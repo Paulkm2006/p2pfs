@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    />
+    <title>p2pfs · 分片协作</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brandmark" aria-hidden="true">p</span>
+          <div>p2pfs<small>把连接，变成可靠存储</small></div>
+        </div>
+        <p class="nav-caption">工作空间</p>
+        <nav aria-label="主导航">
+          <button class="nav-item active" data-view="files" aria-current="page">
+            <span aria-hidden="true">▦</span> 文件发现
+            <span id="file-count" class="count">0</span>
+          </button>
+          <button class="nav-item" data-view="tasks">
+            <span aria-hidden="true">↓</span> 下载任务
+            <span id="task-count" class="count">0</span>
+          </button>
+          <button class="nav-item" data-view="settings">
+            <span aria-hidden="true">⚙</span> 连接与存储
+          </button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="connection-line">
+            <span id="connection-dot" class="dot"></span
+            ><strong id="connection-label">未连接</strong>
+          </div>
+          <p id="device-name">连接你的协作空间</p>
+          <div class="storage-label">
+            <span>本机数据占用</span><strong id="storage-bytes">—</strong>
+          </div>
+          <small>RS 4 + 2 · UDP 传输</small>
+          <div class="build-label">MVP · Windows</div>
+        </div>
+      </aside>
+      <main>
+        <div id="notice" role="status" class="notice" hidden>
+          <span id="notice-text"></span
+          ><button id="dismiss-notice" aria-label="关闭提示">×</button>
+        </div>
+        <section id="view-files" class="view">
+          <header class="page-header">
+            <div>
+              <div class="eyebrow">协作空间 / 文件</div>
+              <h1>发现可共享的文件</h1>
+              <p>从不同设备收集分片，恢复完整文件。</p>
+            </div>
+            <button id="publish" class="button primary" disabled>
+              <span aria-hidden="true">＋</span> 发布文件
+            </button>
+          </header>
+          <div class="metrics">
+            <div class="metric">
+              <span>发现文件</span
+              ><strong id="metric-files">0<small>个版本</small></strong>
+            </div>
+            <div class="metric">
+              <span>候选来源设备</span
+              ><strong id="metric-peers">0<small>台</small></strong>
+            </div>
+            <div class="metric">
+              <span>恢复所需</span
+              ><strong>4<small>个不同的有效分片</small></strong>
+            </div>
+          </div>
+          <div class="toolbar">
+            <label class="search"
+              ><span aria-hidden="true">⌕</span
+              ><input
+                id="search"
+                type="search"
+                placeholder="搜索文件名称或版本 ID"
+                aria-label="按名称或版本筛选" /></label
+            ><span id="sync-time">连接后同步文件</span
+            ><button id="refresh" class="button secondary" disabled>
+              刷新
+            </button>
+          </div>
+          <div class="file-layout">
+            <div class="card file-card">
+              <div class="table-head">
+                <span>文件 / 版本</span><span>大小</span><span>候选分片</span>
+              </div>
+              <div id="file-list"></div>
+              <div id="files-empty" class="empty">
+                <div class="empty-symbol" aria-hidden="true">▦</div>
+                <h2>从连接一台设备开始</h2>
+                <p>配置协调服务后，即可发现和发布文件。</p>
+                <button class="button secondary" data-view="settings">
+                  配置连接
+                </button>
+              </div>
+            </div>
+            <aside id="file-detail" class="card detail" aria-label="文件详情">
+              <div class="detail-empty">
+                <span aria-hidden="true">◈</span>
+                <h2>每个分片都有位置</h2>
+                <p>选择一个文件，查看版本、分片分布与来源。</p>
+                <div class="shard-illustration" aria-hidden="true">
+                  <i></i><i></i><i></i><i></i><i></i><i></i>
+                </div>
+                <p class="fine">
+                  任意 4 个校验有效的不同分片<br />可恢复原始文件
+                </p>
+              </div>
+            </aside>
+          </div>
+          <p class="footnote">
+            候选分片来自服务端的持有声明，不代表当前一定可达。最终以实际传输与完整性校验结果为准。
+          </p>
+        </section>
+        <section id="view-tasks" class="view" hidden>
+          <header class="page-header">
+            <div>
+              <div class="eyebrow">协作空间 / 传输</div>
+              <h1>下载任务</h1>
+              <p>已校验的完整分片可在暂停或重启后复用。</p>
+            </div>
+            <div class="header-actions">
+              <span id="task-summary" class="tag">暂无任务</span
+              ><button id="export-statistics" class="button secondary">
+                导出统计
+              </button>
+            </div>
+          </header>
+          <div id="tasks-list" class="task-list"></div>
+          <div id="tasks-empty" class="card empty">
+            <div class="empty-symbol" aria-hidden="true">↓</div>
+            <h2>还没有下载任务</h2>
+            <p>在文件发现中选择一个版本和保存位置。</p>
+            <button class="button secondary" data-view="files">发现文件</button>
+          </div>
+          <p class="footnote">
+            分片计数表示已完成校验的分片。任务只有在恢复文件、整文件校验并写入成功后才会显示“已完成”。取消会保留完整分片缓存。
+          </p>
+        </section>
+        <section id="view-settings" class="view" hidden>
+          <header class="page-header">
+            <div>
+              <div class="eyebrow">本机 / 设置</div>
+              <h1>连接与存储</h1>
+              <p>无需账号。连接后由协调服务分配设备 UUID。</p>
+            </div>
+            <span id="settings-state" class="tag">未连接</span>
+          </header>
+          <form id="config-form" class="card settings-card">
+            <h2>协调服务</h2>
+            <p class="muted">
+              控制通道默认要求 HTTPS。STUN / TURN 地址由服务端配置。
+            </p>
+            <label class="field"
+              >服务端地址<input
+                id="server-url"
+                type="url"
+                required
+                placeholder="https://your-server.example:8443"
+            /></label>
+            <label class="field"
+              >设备名称<input
+                id="name"
+                required
+                maxlength="80"
+                placeholder="例如：实验室 · 设备 A"
+            /></label>
+            <label class="field"
+              >本机数据目录
+              <div class="input-row">
+                <input
+                  id="data-dir"
+                  required
+                  placeholder="选择分片与任务数据存储位置"
+                /><button
+                  id="choose-data"
+                  type="button"
+                  class="button secondary"
+                >
+                  选择目录
+                </button>
+              </div></label
+            >
+            <div class="settings-grid">
+              <label class="field"
+                >下载并发分片数<input
+                  id="concurrency"
+                  type="number"
+                  min="1"
+                  max="6"
+                  value="3"
+                  required /></label
+              ><label class="field"
+                >上行速率上限（KiB/s）<input
+                  id="upload-rate"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value="0"
+                  required
+                /><small class="fine">0 表示不设置手动上限</small></label
+              >
+            </div>
+            <label class="checkbox"
+              ><input id="force-relay" type="checkbox" /><span
+                >强制使用 UDP 中转<small
+                  >用于中转验收；关闭后优先尝试直连</small
+                ></span
+              ></label
+            >
+            <label class="checkbox"
+              ><input id="insecure-local" type="checkbox" /><span
+                >允许本机调试 HTTP<small
+                  >仅限回环地址。不要用于不可信网络</small
+                ></span
+              ></label
+            >
+            <div class="form-actions">
+              <button id="connect" type="submit" class="button primary">
+                连接并保存</button
+              ><button
+                id="disconnect"
+                type="button"
+                class="button danger"
+                hidden
+              >
+                断开连接</button
+              ><span id="connecting-text" class="muted"></span>
+            </div>
+          </form>
+          <div class="settings-grid">
+            <div class="card info-card">
+              <h2>设备标识</h2>
+              <p id="uuid" class="mono wrap">尚未连接</p>
+              <p class="fine">UUID 是设备标识。会话凭据不会发送到界面。</p>
+            </div>
+            <div class="card info-card">
+              <h2>实际本机数据</h2>
+              <p id="storage-detail">尚未读取</p>
+              <p id="storage-path" class="fine wrap"></p>
+              <button id="read-storage" class="button secondary">
+                重新统计
+              </button>
+            </div>
+          </div>
+          <p class="footnote">
+            发布文件不等于已分发到其他设备。可在其他设备选择“保留分片”建立冗余；本机断开时停止提供分片。UDP
+            被完全阻断的网络可能无法传输。
+          </p>
+        </section>
+      </main>
+    </div>
+    <dialog id="confirm-dialog">
+      <form method="dialog">
+        <h2 id="dialog-title"></h2>
+        <p id="dialog-copy"></p>
+        <div id="dialog-body"></div>
+        <div class="dialog-actions">
+          <button value="cancel" class="button secondary">取消</button
+          ><button value="confirm" id="dialog-confirm" class="button primary">
+            确认
+          </button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>
