@@ -19,10 +19,7 @@ This protocol and its gated test are committed before collecting any performance
 ## Reproduction
 
 ```sh
-export PATH=/workspace/shared/toolchains/go/bin:$PATH
-export GOMODCACHE=/workspace/shared/gomodcache
-export GOPATH=/workspace/shared/gopath
-export GOCACHE=/workspace/shared/gocache
+go version # tested with Go 1.27.2
 go test -c -o /tmp/p2pfs-scheduler.test ./internal/client
 P2PFS_SCHEDULER_EXPERIMENT=1 /tmp/p2pfs-scheduler.test \
   -test.run '^TestSchedulerControlledComparison$' -test.v -test.timeout=20m
@@ -41,7 +38,7 @@ These are controlled-fixture results for NFR-004. They do not establish the same
 
 ### Execution and environment
 
-- Protocol/test commit: `3319c1358bb1c778b5cb0802f2ebe7388309a609`, based on backend commit `3eb3b35`.
+- Local protocol/test commit: `3319c1358bb1c778b5cb0802f2ebe7388309a609`, based on local backend commit `3eb3b35`. These identify the local pre-measurement record; GitHub publication occurred later and uses different commit IDs. The gated test contents were not changed after timing.
 - UTC interval: 2026-10-11 05:57:30.731957 to 05:59:19.013429. The Go test reported 108.27 seconds in total, including fixture setup and cleanup; heterogeneous 79.01 seconds and uniform 29.26 seconds.
 - Go 1.27.2, Linux amd64, kernel 6.18.44, reported CPU Intel Xeon Platinum 8573C, nine visible logical CPUs, `GOMAXPROCS=9`. `/proc/meminfo` reported 10,206,504 KiB total memory. These are guest observations, not a controlled hardware allocation.
 - Local overlay filesystem, 32 GiB reported capacity and approximately 28 GiB free before the run. Sources, shards, reconstructed files, coordinator, and all peers were in the same cloud container and test process. The system page cache was not flushed; source data was already read during publication, and run order was alternated.
