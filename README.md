@@ -72,4 +72,5 @@ go build -tags production -ldflags="-H windowsgui" -o p2pfs.exe .
 - [架构和协议](docs/architecture.md)
 - [测试与已知限制](docs/testing.md)
 - [存储模块 1 GiB 实测](docs/storage-test-results.md)
+- [协调服务10分钟负载](docs/control-load-results.md)
 - [MIT License](LICENSE)
