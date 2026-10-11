@@ -222,6 +222,8 @@ func (c *Client) Start(ctx context.Context) error {
 		return nil
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
+	c.wg.Add(1)
+	defer c.wg.Done()
 	c.started = true
 	c.mu.Unlock()
 	if err := c.register(c.ctx); err != nil {
@@ -257,6 +259,11 @@ func (c *Client) register(ctx context.Context) error {
 		return err
 	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		t.Close()
+		return errors.New("客户端已关闭")
+	}
 	old := c.transport
 	c.transport = t
 	c.state.Identity = r.Identity
@@ -399,8 +406,14 @@ func (c *Client) file(ctx context.Context, id string) (model.FileInfo, error) {
 }
 func (c *Client) Publish(ctx context.Context, path string) (model.Manifest, error) {
 	c.mu.Lock()
+	if c.closed || !c.started {
+		c.mu.Unlock()
+		return model.Manifest{}, errors.New("客户端未连接或已关闭")
+	}
+	c.wg.Add(1)
 	c.publishing++
 	c.mu.Unlock()
+	defer c.wg.Done()
 	defer func() { c.mu.Lock(); c.publishing--; c.mu.Unlock() }()
 	info, e := os.Stat(path)
 	if e != nil {
@@ -668,10 +681,19 @@ func wait(ctx context.Context, d time.Duration) bool {
 func (c *Client) beginOperation(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("客户端已关闭")
+	}
 	if c.operations[id] {
 		return errors.New("该文件正在发布或接收分片，请等待完成或取消当前操作")
 	}
 	c.operations[id] = true
+	c.wg.Add(1)
 	return nil
 }
-func (c *Client) endOperation(id string) { c.mu.Lock(); delete(c.operations, id); c.mu.Unlock() }
+func (c *Client) endOperation(id string) {
+	c.mu.Lock()
+	delete(c.operations, id)
+	c.mu.Unlock()
+	c.wg.Done()
+}
