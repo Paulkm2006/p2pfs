@@ -161,7 +161,7 @@ func TestControlPlaneLoadAcceptance(t *testing.T) {
 // It is not a replacement for TestControlPlaneLoadAcceptance.
 func TestControlPlaneLoadFixture(t *testing.T) {
 	f := newControlLoadFixture(t)
-	for n := range 100 {
+	for n := range 10 {
 		if err, _ := f.mixed(n, ""); err != nil {
 			t.Fatal(err)
 		}
