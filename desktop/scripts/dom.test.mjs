@@ -37,7 +37,11 @@ async function exerciseDesktop(lineEnding) {
       assert.ok(node, selector);
       node.click();
     };
-  w.setInterval = () => 0;
+  const pollIntervals = [];
+  w.setInterval = (_, milliseconds) => {
+    pollIntervals.push(milliseconds);
+    return 0;
+  };
   w.HTMLDialogElement.prototype.showModal = function () {
     this.setAttribute('open', '');
   };
@@ -159,6 +163,7 @@ async function exerciseDesktop(lineEnding) {
     'helpers',
     `const {bytes, shardSources, stateLabel, taskActions, filterFiles, sourceTime}=helpers;return (async()=>{${source}\n})();`,
   )(api, helpers);
+  assert.deepEqual(pollIntervals, [1000, 10000]);
   assert.equal($('#view-settings').hidden, false);
   assert.equal($('#publish').disabled, true);
   click('#connect');

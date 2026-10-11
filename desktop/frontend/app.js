@@ -663,5 +663,5 @@ await poll(true);
 await readStorage().catch((error) =>
   notify(`数据目录统计失败：${message(error)}`, true),
 );
-setInterval(poll, 1500);
+setInterval(poll, 1000);
 setInterval(() => refreshFiles(false), 10000);
