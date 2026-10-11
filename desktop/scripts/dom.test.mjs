@@ -12,15 +12,19 @@ async function until(check) {
   assert.fail('DOM condition did not settle');
 }
 
-test('DOM-only mocked bridge: connect, safe rendering, task/share dialogs, duplicate actions, disconnect', async () => {
+async function exerciseDesktop(lineEnding) {
   const html = await readFile(
     new URL('../frontend/index.html', import.meta.url),
     'utf8',
   );
-  const js = await readFile(
+  const inputJS = await readFile(
     new URL('../frontend/app.js', import.meta.url),
     'utf8',
   );
+  // Exercise both checkouts on every OS, rather than relying on core.autocrlf.
+  const js = inputJS
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n/g, lineEnding === 'CRLF' ? '\r\n' : '\n');
   const dom = new JSDOM(html, {
       runScripts: 'outside-only',
       url: 'http://wails.localhost',
@@ -149,7 +153,7 @@ test('DOM-only mocked bridge: connect, safe rendering, task/share dialogs, dupli
     localFiles: async () => [],
     exportStatistics: async () => '',
   };
-  const source = js.replace(/^import[\s\S]*?;\n/gm, '');
+  const source = js.replace(/^import[\s\S]*?;\r?\n/gm, '');
   await new w.Function(
     'api',
     'helpers',
@@ -235,4 +239,9 @@ test('DOM-only mocked bridge: connect, safe rendering, task/share dialogs, dupli
   assert.equal($('[data-action=download]'), null);
   assert.equal($('#publish').disabled, true);
   dom.window.close();
-});
+}
+
+for (const lineEnding of ['LF', 'CRLF']) {
+  test(`DOM-only mocked bridge (${lineEnding}): connect, safe rendering, task/share dialogs, duplicate actions, disconnect`, () =>
+    exerciseDesktop(lineEnding));
+}
