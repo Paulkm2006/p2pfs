@@ -505,6 +505,140 @@ func newID() string {
 	}
 	return hex.EncodeToString(b[:])
 }
+func (c *Client) StartDownload(fileID, destination string) (string, error) {
+	dest, e := filepath.Abs(destination)
+	if e != nil {
+		return "", e
+	}
+	if _, e = os.Lstat(dest); e == nil {
+		return "", errors.New("目标文件已存在，请选择其他名称")
+	} else if !os.IsNotExist(e) {
+		return "", e
+	}
+	f, e := os.CreateTemp(filepath.Dir(dest), ".p2pfs-write-check-*")
+	if e != nil {
+		return "", fmt.Errorf("目标目录不可写: %w", e)
+	}
+	f.Close()
+	os.Remove(f.Name())
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.started {
+		return "", errors.New("尚未连接")
+	}
+	if c.operations[fileID] {
+		return "", errors.New("该文件正在执行共享操作，请稍后重试")
+	}
+	for _, t := range c.state.Tasks {
+		if t.Destination == dest && t.State != "cancelled" && t.State != "failed" {
+			return t.ID, nil
+		}
+	}
+	t := &Task{ID: newID(), FileID: fileID, Destination: dest, State: "connecting", CreatedAt: time.Now()}
+	c.state.Tasks[t.ID] = t
+	if e = c.saveLocked(); e != nil {
+		delete(c.state.Tasks, t.ID)
+		return "", e
+	}
+	c.runLocked(t)
+	return t.ID, nil
+}
+func (c *Client) runLocked(t *Task) {
+	ctx, cancel := context.WithCancel(c.ctx)
+	r := &runningTask{cancel: cancel, done: make(chan struct{})}
+	c.runs[t.ID] = r
+	t.State = "connecting"
+	t.Error = ""
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		defer close(r.done)
+		c.download(ctx, t.ID)
+		c.mu.Lock()
+		delete(c.runs, t.ID)
+		c.saveLocked()
+		c.mu.Unlock()
+	}()
+}
+func (c *Client) Pause(id string) error  { return c.stop(id, "paused") }
+func (c *Client) Cancel(id string) error { return c.stop(id, "cancelled") }
+func (c *Client) stop(id, state string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t, ok := c.state.Tasks[id]
+	if !ok {
+		return errors.New("任务不存在")
+	}
+	if t.State == "complete" {
+		return nil
+	}
+	t.State = state
+	t.Error = ""
+	if r := c.runs[id]; r != nil {
+		r.cancel()
+	}
+	return c.saveLocked()
+}
+func (c *Client) Resume(id string) error {
+	c.mu.Lock()
+	t, ok := c.state.Tasks[id]
+	if !ok {
+		c.mu.Unlock()
+		return errors.New("任务不存在")
+	}
+	if t.State == "complete" {
+		c.mu.Unlock()
+		return nil
+	}
+	r := c.runs[id]
+	if r != nil && t.State != "paused" && t.State != "cancelled" {
+		c.mu.Unlock()
+		return nil
+	}
+	c.mu.Unlock()
+	if r != nil {
+		select {
+		case <-r.done:
+		case <-time.After(2 * time.Second):
+			return errors.New("仍在停止旧传输，请稍后重试")
+		}
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.started {
+		return errors.New("尚未连接")
+	}
+	if c.runs[id] != nil {
+		return nil
+	}
+	if c.operations[t.FileID] {
+		return errors.New("该文件正在执行共享操作，请稍后重试")
+	}
+	c.runLocked(t)
+	return c.saveLocked()
+}
+func (c *Client) taskState(id, state, errtext string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	t := c.state.Tasks[id]
+	if t.State == "paused" || t.State == "cancelled" {
+		return
+	}
+	t.State = state
+	t.Error = errtext
+	c.saveLocked()
+}
+func wait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
 func (c *Client) beginOperation(id string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
