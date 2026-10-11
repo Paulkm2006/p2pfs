@@ -36,6 +36,9 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
       - run: npm ci
       - run: npm test
+      - name: Windows client identity-directory checks
+        working-directory: .
+        run: go test ./internal/client -run "TestExclusiveDirectoryAndIdempotentClose|TestSecurityLocalConfiguration" -count=1
       - run: go test ./...
       - run: go vet ./...
       - run: go build -trimpath -tags production -ldflags="-s -w -H windowsgui" -o p2pfs.exe .
