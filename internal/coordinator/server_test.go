@@ -245,3 +245,28 @@ func TestHealthAndAuthenticationBoundary(t *testing.T) {
 		request(t, s, endpoint.method, endpoint.path, "", nil, 401)
 	}
 }
+
+func TestSignalInboxByteBudget(t *testing.T) {
+	s := newServer(t, Config{MaxSignalBytes: 512})
+	a := registerPeer(t, s, model.Identity{})
+	b := registerPeer(t, s, model.Identity{})
+	sig := model.Signal{ID: "test", To: b.UUID, Type: "offer", SDP: strings.Repeat("a", 200)}
+	request(t, s, "POST", "/v1/signals", a.Token, sig, 202)
+	request(t, s, "POST", "/v1/signals", a.Token, sig, 429)
+	request(t, s, "GET", "/v1/signals", b.Token, nil, 200)
+	request(t, s, "POST", "/v1/signals", a.Token, sig, 202)
+}
+func TestSTUNConfigurationAcceptsOnlyValidUDPURLs(t *testing.T) {
+	for _, url := range []string{"stun:", "stuns:example.com:5349", "turn:example.com:3478?transport=udp", "stun:example.com:3478?transport=tcp", "stun:example.com:invalid"} {
+		s, err := New(Config{DatabasePath: ":memory:", STUNURLs: []string{url}})
+		if err == nil {
+			s.Close()
+			t.Errorf("accepted invalid/non-UDP STUN URL: %s", url)
+		}
+	}
+	s := newServer(t, Config{STUNURLs: []string{"stun:127.0.0.1:3478"}})
+	p := registerPeer(t, s, model.Identity{})
+	if len(p.ICEServers) != 1 || p.ICEServers[0].URLs[0] != "stun:127.0.0.1:3478" {
+		t.Fatal("STUN configuration did not reach registration")
+	}
+}

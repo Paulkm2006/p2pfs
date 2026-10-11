@@ -23,6 +23,7 @@ import (
 	"github.com/Paulkm2006/p2pfs/internal/codec"
 	"github.com/Paulkm2006/p2pfs/internal/model"
 	"github.com/labstack/echo/v5"
+	"github.com/pion/stun/v3"
 	_ "modernc.org/sqlite"
 )
 
@@ -41,6 +42,7 @@ type Config struct {
 	MaxDevices        int
 	MaxFiles          int
 	MaxSignals        int
+	MaxSignalBytes    int
 	MaxBodyBytes      int64
 	// Now is injectable for deterministic expiry tests. Leave nil in production.
 	Now func() time.Time
@@ -57,6 +59,7 @@ type queuedSignal struct {
 	signal   model.Signal
 	expires  time.Time
 	fromHash string
+	bytes    int
 }
 
 type Server struct {
@@ -105,17 +108,21 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxSignals == 0 {
 		cfg.MaxSignals = 64
 	}
+	if cfg.MaxSignalBytes == 0 {
+		cfg.MaxSignalBytes = 512 << 10
+	}
 	if cfg.MaxBodyBytes == 0 {
 		cfg.MaxBodyBytes = 64 << 10
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	if cfg.SessionTTL <= 0 || cfg.OnlineTTL <= 0 || cfg.HeartbeatInterval <= 0 || cfg.SignalTTL <= 0 || cfg.MaxSessions < 1 || cfg.MaxDevices < 1 || cfg.MaxFiles < 1 || cfg.MaxSignals < 1 || cfg.MaxBodyBytes < 1 {
+	if cfg.SessionTTL <= 0 || cfg.OnlineTTL <= 0 || cfg.HeartbeatInterval <= 0 || cfg.SignalTTL <= 0 || cfg.MaxSessions < 1 || cfg.MaxDevices < 1 || cfg.MaxFiles < 1 || cfg.MaxSignals < 1 || cfg.MaxSignalBytes < 1 || cfg.MaxBodyBytes < 1 {
 		return nil, errors.New("invalid coordinator limits")
 	}
 	for _, u := range cfg.STUNURLs {
-		if !strings.HasPrefix(u, "stun:") || strings.ContainsAny(u, "\r\n\x00") {
+		parsed, err := stun.ParseURI(u)
+		if err != nil || parsed.Scheme != stun.SchemeTypeSTUN || parsed.Proto != stun.ProtoTypeUDP || strings.ContainsAny(u, "\r\n\x00") {
 			return nil, errors.New("STUN URLs must use stun: (UDP)")
 		}
 	}
@@ -628,7 +635,17 @@ func (s *Server) sendSignal(c *echo.Context) error {
 		return bad(429, "target signal queue full")
 	}
 	sig.From = p.uuid
-	target.inbox = append(target.inbox, queuedSignal{signal: sig, expires: now.Add(s.cfg.SignalTTL), fromHash: p.tokenHash})
+	// Bound total retained strings, not merely message count: a large SDP must
+	// not multiply the per-peer queue allowance into hundreds of megabytes.
+	size := len(sig.SDP) + len(sig.ID) + len(sig.From) + len(sig.To) + len(sig.Type) + 64
+	used := 0
+	for _, queued := range target.inbox {
+		used += queued.bytes
+	}
+	if size > s.cfg.MaxSignalBytes-used {
+		return bad(429, "target signal byte budget full")
+	}
+	target.inbox = append(target.inbox, queuedSignal{signal: sig, expires: now.Add(s.cfg.SignalTTL), fromHash: p.tokenHash, bytes: size})
 	return c.NoContent(202)
 }
 func (s *Server) receiveSignals(c *echo.Context) error {
