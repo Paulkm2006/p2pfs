@@ -75,6 +75,10 @@ type peerScore struct {
 	failedAt time.Time
 }
 type Client struct {
+	closeOnce     sync.Once
+	closeErr      error
+	unlock        func() error
+	closed        bool
 	cfg           Config
 	http          *http.Client
 	mu            sync.Mutex
@@ -96,7 +100,7 @@ type Client struct {
 	transferMu    sync.Mutex // serializes cache publication, not network transfers
 }
 
-func New(cfg Config) (*Client, error) {
+func New(cfg Config) (result *Client, err error) {
 	u, err := url.Parse(cfg.ServerURL)
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("服务端地址无效")
@@ -125,7 +129,16 @@ func New(cfg Config) (*Client, error) {
 	if err = os.MkdirAll(cfg.DataDir, 0700); err != nil {
 		return nil, err
 	}
-	c := &Client{cfg: cfg, http: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, runs: map[string]*runningTask{}, scores: map[string]peerScore{}, failedChoices: map[string]time.Time{}, operations: map[string]bool{}}
+	unlock, err := lockDataDir(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if result == nil {
+			unlock()
+		}
+	}()
+	c := &Client{unlock: unlock, cfg: cfg, http: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, runs: map[string]*runningTask{}, scores: map[string]peerScore{}, failedChoices: map[string]time.Time{}, operations: map[string]bool{}}
 	c.state = localState{ServerURL: cfg.ServerURL, Manifests: map[string]model.Manifest{}, Sharing: map[string]bool{}, Tasks: map[string]*Task{}}
 	data, err := os.ReadFile(filepath.Join(cfg.DataDir, "config.json"))
 	if err == nil {
@@ -200,6 +213,10 @@ func (c *Client) Status() string {
 }
 func (c *Client) Start(ctx context.Context) error {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return errors.New("客户端已关闭，请重新打开")
+	}
 	if c.started {
 		c.mu.Unlock()
 		return nil
@@ -467,23 +484,32 @@ func (c *Client) openShard(id string, index int) (io.ReadCloser, int64, error) {
 	return f, m.Shards[index].Size, e
 }
 func (c *Client) Close() error {
-	c.mu.Lock()
-	if c.cancel != nil {
-		c.cancel()
-	}
-	for _, run := range c.runs {
-		run.cancel()
-	}
-	t := c.transport
-	c.started = false
-	c.mu.Unlock()
-	if t != nil {
-		t.Close()
-	}
-	c.wg.Wait()
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.saveLocked()
+	c.closeOnce.Do(func() {
+		c.mu.Lock()
+		c.closed = true
+		if c.cancel != nil {
+			c.cancel()
+		}
+		for _, run := range c.runs {
+			run.cancel()
+		}
+		tr := c.transport
+		c.started = false
+		c.mu.Unlock()
+		if tr != nil {
+			tr.Close()
+		}
+		c.wg.Wait()
+		c.mu.Lock()
+		c.closeErr = c.saveLocked()
+		c.mu.Unlock()
+		if c.unlock != nil {
+			if err := c.unlock(); c.closeErr == nil {
+				c.closeErr = err
+			}
+		}
+	})
+	return c.closeErr
 }
 func (c *Client) Tasks() []Task {
 	c.mu.Lock()
