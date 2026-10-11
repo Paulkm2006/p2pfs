@@ -1,0 +1,41 @@
+name: build-and-test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go build ./cmd/server ./cmd/peer
+      - name: Windows headless client cross-build
+        run: GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o peer.exe ./cmd/peer
+  windows-desktop:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          cache-dependency-path: desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: go test ./...
+      - run: go vet ./...
+      - run: go build -trimpath -tags production -ldflags="-s -w -H windowsgui" -o p2pfs.exe .
